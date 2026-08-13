@@ -1,3 +1,6 @@
+import html
+import sqlite3
+from pathlib import Path
 
 import streamlit as st
 
@@ -25,12 +28,76 @@ VEICULOS = [
     {"id": "VEI-010", "nome": "Veículo 10"},
 ]
 
+DB_PATH = Path(__file__).with_name("veiculos.db")
 
-if "emprestimos" not in st.session_state:
-    st.session_state.emprestimos = {}
 
-for veiculo in VEICULOS:
-    st.session_state.emprestimos.setdefault(veiculo["id"], "Disponível")
+def conectar() -> sqlite3.Connection:
+    conexao = sqlite3.connect(DB_PATH, timeout=10)
+    conexao.execute("PRAGMA journal_mode=WAL")
+    conexao.execute("PRAGMA busy_timeout=10000")
+    return conexao
+
+
+def inicializar_banco() -> None:
+    with conectar() as conexao:
+        conexao.execute(
+            """
+            CREATE TABLE IF NOT EXISTS veiculos (
+                id TEXT PRIMARY KEY,
+                nome TEXT NOT NULL,
+                responsavel TEXT,
+                atualizado_em TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        for veiculo in VEICULOS:
+            conexao.execute(
+                """
+                INSERT INTO veiculos (id, nome)
+                VALUES (?, ?)
+                ON CONFLICT(id) DO UPDATE SET nome = excluded.nome
+                """,
+                (veiculo["id"], veiculo["nome"]),
+            )
+
+
+def consultar_emprestimos() -> dict[str, str]:
+    ids = [veiculo["id"] for veiculo in VEICULOS]
+    placeholders = ",".join("?" for _ in ids)
+    with conectar() as conexao:
+        linhas = conexao.execute(
+            f"SELECT id, responsavel FROM veiculos WHERE id IN ({placeholders})",
+            ids,
+        ).fetchall()
+    return {veiculo_id: responsavel or "Disponível" for veiculo_id, responsavel in linhas}
+
+
+def registrar_retirada(veiculo_id: str, responsavel: str) -> bool:
+    with conectar() as conexao:
+        resultado = conexao.execute(
+            """
+            UPDATE veiculos
+               SET responsavel = ?, atualizado_em = CURRENT_TIMESTAMP
+             WHERE id = ? AND responsavel IS NULL
+            """,
+            (responsavel, veiculo_id),
+        )
+    return resultado.rowcount == 1
+
+
+def devolver(veiculo_id: str) -> None:
+    with conectar() as conexao:
+        conexao.execute(
+            """
+            UPDATE veiculos
+               SET responsavel = NULL, atualizado_em = CURRENT_TIMESTAMP
+             WHERE id = ?
+            """,
+            (veiculo_id,),
+        )
+
+
+inicializar_banco()
 
 
 @st.dialog("Retirar veículo", icon="🚗")
@@ -47,12 +114,10 @@ def abrir_retirada(veiculo: dict) -> None:
         if not nome_limpo:
             st.error("Informe o nome da pessoa antes de confirmar.")
         else:
-            st.session_state.emprestimos[veiculo["id"]] = nome_limpo
-            st.rerun()
-
-
-def devolver(veiculo_id: str) -> None:
-    st.session_state.emprestimos[veiculo_id] = "Disponível"
+            if registrar_retirada(veiculo["id"], nome_limpo):
+                st.rerun()
+            else:
+                st.error("Este veículo acabou de ser retirado por outra pessoa.")
 
 
 st.markdown(
@@ -140,8 +205,9 @@ st.markdown(
 )
 
 total = len(VEICULOS)
+emprestimos = consultar_emprestimos()
 disponiveis = sum(
-    st.session_state.emprestimos[v["id"]] == "Disponível" for v in VEICULOS
+    emprestimos[v["id"]] == "Disponível" for v in VEICULOS
 )
 emprestados = total - disponiveis
 
@@ -150,13 +216,16 @@ m1.metric("Total da frota", total)
 m2.metric("Disponíveis", disponiveis)
 m3.metric("Em uso", emprestados)
 
+if st.button("↻ Atualizar status", use_container_width=True):
+    st.rerun()
+
 st.write("")
 
 for inicio in range(0, len(VEICULOS), 2):
     colunas = st.columns(2)
 
     for coluna, veiculo in zip(colunas, VEICULOS[inicio : inicio + 2]):
-        responsavel = st.session_state.emprestimos[veiculo["id"]]
+        responsavel = emprestimos[veiculo["id"]]
         disponivel = responsavel == "Disponível"
         cor = "#22c55e" if disponivel else "#ef4444"
         halo = "rgba(34,197,94,.16)" if disponivel else "rgba(239,68,68,.16)"
@@ -167,11 +236,11 @@ for inicio in range(0, len(VEICULOS), 2):
                     f"""
                     <div class="veiculo-topo">
                         <span class="status-dot" style="--cor:{cor};--halo:{halo}"></span>
-                        <span class="veiculo-nome">{veiculo["nome"]}</span>
+                        <span class="veiculo-nome">{html.escape(veiculo["nome"])}</span>
                     </div>
                     <div class="veiculo-id">ID: {veiculo["id"]}</div>
                     <div class="responsavel-label">Responsável atual</div>
-                    <div class="responsavel">{responsavel}</div>
+                    <div class="responsavel">{html.escape(responsavel)}</div>
                     """,
                     unsafe_allow_html=True,
                 )
@@ -196,5 +265,3 @@ for inicio in range(0, len(VEICULOS), 2):
                         disabled=disponivel,
                         use_container_width=True,
                     )
-
-
