@@ -1,6 +1,11 @@
+import fcntl
 import html
-import sqlite3
+import json
+import os
+import tempfile
+from datetime import datetime
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 
@@ -12,92 +17,152 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# EDITE SOMENTE ESTA LISTA PARA ALTERAR A FROTA.
-# Para incluir, adicione um item com ID único e nome.
-# Para remover, apague o item. Para renomear, altere apenas "nome".
-VEICULOS = [
-    {"id": "VEI-001", "nome": "Veículo 01"},
-    {"id": "VEI-002", "nome": "Veículo 02"},
-    {"id": "VEI-003", "nome": "Veículo 03"},
-    {"id": "VEI-004", "nome": "Veículo 04"},
-    {"id": "VEI-005", "nome": "Veículo 05"},
-    {"id": "VEI-006", "nome": "Veículo 06"},
-    {"id": "VEI-007", "nome": "Veículo 07"},
-    {"id": "VEI-008", "nome": "Veículo 08"},
-    {"id": "VEI-009", "nome": "Veículo 09"},
-    {"id": "VEI-010", "nome": "Veículo 10"},
+ARQUIVO_JSON = Path(__file__).with_name("veiculos.json")
+ARQUIVO_LOCK = Path(__file__).with_name("veiculos.lock")
+FUSO_HORARIO = ZoneInfo("America/Sao_Paulo")
+
+# Usado somente na primeira execução, quando veiculos.json ainda não existe.
+FROTA_INICIAL = [
+    {"id": f"VEI-{numero:03d}", "nome": f"Veículo {numero:02d}"}
+    for numero in range(1, 11)
 ]
 
-DB_PATH = Path(__file__).with_name("veiculos.db")
+
+def agora() -> str:
+    return datetime.now(FUSO_HORARIO).strftime("%d/%m/%Y %H:%M:%S")
 
 
-def conectar() -> sqlite3.Connection:
-    conexao = sqlite3.connect(DB_PATH, timeout=10)
-    conexao.execute("PRAGMA journal_mode=WAL")
-    conexao.execute("PRAGMA busy_timeout=10000")
-    return conexao
+def dados_iniciais() -> dict:
+    return {
+        "veiculos": [
+            {**veiculo, "responsavel": None} for veiculo in FROTA_INICIAL
+        ],
+        "historico": [
+            {
+                "data_hora": agora(),
+                "movimento": "Frota inicial criada",
+                "veiculo": "10 veículos",
+                "id": "—",
+                "responsavel": "—",
+            }
+        ],
+    }
 
 
-def inicializar_banco() -> None:
-    with conectar() as conexao:
-        conexao.execute(
-            """
-            CREATE TABLE IF NOT EXISTS veiculos (
-                id TEXT PRIMARY KEY,
-                nome TEXT NOT NULL,
-                responsavel TEXT,
-                atualizado_em TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-            """
-        )
-        for veiculo in VEICULOS:
-            conexao.execute(
-                """
-                INSERT INTO veiculos (id, nome)
-                VALUES (?, ?)
-                ON CONFLICT(id) DO UPDATE SET nome = excluded.nome
-                """,
-                (veiculo["id"], veiculo["nome"]),
-            )
+def ler_sem_lock() -> dict:
+    if not ARQUIVO_JSON.exists():
+        return dados_iniciais()
+    with ARQUIVO_JSON.open("r", encoding="utf-8") as arquivo:
+        dados = json.load(arquivo)
+    dados.setdefault("veiculos", [])
+    dados.setdefault("historico", [])
+    return dados
 
 
-def consultar_emprestimos() -> dict[str, str]:
-    ids = [veiculo["id"] for veiculo in VEICULOS]
-    placeholders = ",".join("?" for _ in ids)
-    with conectar() as conexao:
-        linhas = conexao.execute(
-            f"SELECT id, responsavel FROM veiculos WHERE id IN ({placeholders})",
-            ids,
-        ).fetchall()
-    return {veiculo_id: responsavel or "Disponível" for veiculo_id, responsavel in linhas}
+def salvar_sem_lock(dados: dict) -> None:
+    descritor, caminho_temporario = tempfile.mkstemp(
+        prefix="veiculos_", suffix=".json", dir=ARQUIVO_JSON.parent
+    )
+    try:
+        with os.fdopen(descritor, "w", encoding="utf-8") as arquivo:
+            json.dump(dados, arquivo, ensure_ascii=False, indent=2)
+            arquivo.flush()
+            os.fsync(arquivo.fileno())
+        os.replace(caminho_temporario, ARQUIVO_JSON)
+    finally:
+        if os.path.exists(caminho_temporario):
+            os.unlink(caminho_temporario)
 
 
-def registrar_retirada(veiculo_id: str, responsavel: str) -> bool:
-    with conectar() as conexao:
-        resultado = conexao.execute(
-            """
-            UPDATE veiculos
-               SET responsavel = ?, atualizado_em = CURRENT_TIMESTAMP
-             WHERE id = ? AND responsavel IS NULL
-            """,
-            (responsavel, veiculo_id),
-        )
-    return resultado.rowcount == 1
+def executar_com_lock(operacao=None):
+    ARQUIVO_LOCK.touch(exist_ok=True)
+    with ARQUIVO_LOCK.open("r+") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        dados = ler_sem_lock()
+        if operacao is not None:
+            resultado = operacao(dados)
+            salvar_sem_lock(dados)
+            return resultado
+        if not ARQUIVO_JSON.exists():
+            salvar_sem_lock(dados)
+        return dados
 
 
-def devolver(veiculo_id: str) -> None:
-    with conectar() as conexao:
-        conexao.execute(
-            """
-            UPDATE veiculos
-               SET responsavel = NULL, atualizado_em = CURRENT_TIMESTAMP
-             WHERE id = ?
-            """,
-            (veiculo_id,),
-        )
+def registrar_historico(
+    dados: dict, movimento: str, veiculo: dict, responsavel: str = "—"
+) -> None:
+    dados["historico"].append(
+        {
+            "data_hora": agora(),
+            "movimento": movimento,
+            "veiculo": veiculo["nome"],
+            "id": veiculo["id"],
+            "responsavel": responsavel or "—",
+        }
+    )
 
 
-inicializar_banco()
+def adicionar_veiculo(veiculo_id: str, nome: str) -> tuple[bool, str]:
+    veiculo_id = veiculo_id.strip().upper()
+    nome = nome.strip()
+
+    def operacao(dados):
+        if any(v["id"].upper() == veiculo_id for v in dados["veiculos"]):
+            return False, "Já existe um veículo com esse ID."
+        veiculo = {"id": veiculo_id, "nome": nome, "responsavel": None}
+        dados["veiculos"].append(veiculo)
+        registrar_historico(dados, "Veículo adicionado", veiculo)
+        return True, "Veículo adicionado."
+
+    return executar_com_lock(operacao)
+
+
+def retirar_veiculo(veiculo_id: str, responsavel: str) -> tuple[bool, str]:
+    def operacao(dados):
+        veiculo = next(v for v in dados["veiculos"] if v["id"] == veiculo_id)
+        if veiculo.get("responsavel"):
+            return False, "Este veículo acabou de ser retirado por outra pessoa."
+        veiculo["responsavel"] = responsavel
+        registrar_historico(dados, "Veículo retirado", veiculo, responsavel)
+        return True, "Retirada registrada."
+
+    return executar_com_lock(operacao)
+
+
+def devolver_veiculo(veiculo_id: str) -> None:
+    def operacao(dados):
+        veiculo = next(v for v in dados["veiculos"] if v["id"] == veiculo_id)
+        responsavel = veiculo.get("responsavel") or "—"
+        veiculo["responsavel"] = None
+        registrar_historico(dados, "Veículo devolvido", veiculo, responsavel)
+
+    executar_com_lock(operacao)
+
+
+def remover_veiculo(veiculo_id: str) -> tuple[bool, str]:
+    def operacao(dados):
+        veiculo = next(v for v in dados["veiculos"] if v["id"] == veiculo_id)
+        if veiculo.get("responsavel"):
+            return False, "Devolva o veículo antes de removê-lo."
+        registrar_historico(dados, "Veículo removido", veiculo)
+        dados["veiculos"].remove(veiculo)
+        return True, "Veículo removido."
+
+    return executar_com_lock(operacao)
+
+
+@st.dialog("Adicionar veículo", icon="➕")
+def abrir_adicao() -> None:
+    veiculo_id = st.text_input("Número ID", placeholder="Ex.: VEI-011")
+    nome = st.text_input("Nome do veículo", placeholder="Ex.: Fiat Argo")
+    if st.button("Adicionar veículo", type="primary", use_container_width=True):
+        if not veiculo_id.strip() or not nome.strip():
+            st.error("Preencha o ID e o nome do veículo.")
+            return
+        sucesso, mensagem = adicionar_veiculo(veiculo_id, nome)
+        if sucesso:
+            st.rerun()
+        st.error(mensagem)
 
 
 @st.dialog("Retirar veículo", icon="🚗")
@@ -108,16 +173,28 @@ def abrir_retirada(veiculo: dict) -> None:
         placeholder="Digite o nome completo",
         key=f'nome_retirada_{veiculo["id"]}',
     )
-
     if st.button("Confirmar retirada", type="primary", use_container_width=True):
-        nome_limpo = nome.strip()
-        if not nome_limpo:
+        nome = nome.strip()
+        if not nome:
             st.error("Informe o nome da pessoa antes de confirmar.")
-        else:
-            if registrar_retirada(veiculo["id"], nome_limpo):
-                st.rerun()
-            else:
-                st.error("Este veículo acabou de ser retirado por outra pessoa.")
+            return
+        sucesso, mensagem = retirar_veiculo(veiculo["id"], nome)
+        if sucesso:
+            st.rerun()
+        st.error(mensagem)
+
+
+@st.dialog("Remover veículo", icon="🗑️")
+def abrir_remocao(veiculo: dict) -> None:
+    st.warning(
+        f'Deseja remover **{veiculo["nome"]}** — `{veiculo["id"]}` da frota?'
+    )
+    st.caption("A remoção ficará registrada no histórico.")
+    if st.button("Confirmar remoção", type="primary", use_container_width=True):
+        sucesso, mensagem = remover_veiculo(veiculo["id"])
+        if sucesso:
+            st.rerun()
+        st.error(mensagem)
 
 
 st.markdown(
@@ -125,67 +202,39 @@ st.markdown(
     <style>
         .stApp { background: #f4f7fb; }
         #MainMenu, header, footer { visibility: hidden; }
-        .block-container {
-            max-width: 1180px;
-            padding-top: 2.5rem;
-            padding-bottom: 3rem;
-        }
+        .block-container { max-width: 1180px; padding-top: 2.5rem; padding-bottom: 3rem; }
         .cabecalho {
-            padding: 1.8rem 2rem;
-            margin-bottom: 1.4rem;
-            color: white;
-            border-radius: 22px;
-            background: linear-gradient(135deg, #172033, #263b61);
+            padding: 1.8rem 2rem; margin-bottom: 1.2rem; color: white;
+            border-radius: 22px; background: linear-gradient(135deg, #172033, #263b61);
             box-shadow: 0 14px 34px rgba(23, 32, 51, 0.18);
         }
         .cabecalho h1 { margin: 0; color: white; font-size: 2rem; }
         .cabecalho p { margin: 0.45rem 0 0; color: #cbd5e1; }
-        div[data-testid="stMetric"] {
-            padding: 1rem 1.2rem;
-            border: 1px solid #e2e8f0;
-            border-radius: 16px;
-            background: white;
-            box-shadow: 0 6px 18px rgba(15, 23, 42, 0.05);
-        }
         div[data-testid="stVerticalBlockBorderWrapper"] {
-            border-color: #e2e8f0;
-            border-radius: 18px;
-            background: white;
+            border-color: #e2e8f0; border-radius: 18px; background: white;
             box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
         }
-        .veiculo-topo {
-            display: flex;
-            align-items: center;
-            gap: 0.7rem;
-            margin-bottom: 0.85rem;
-        }
+        .veiculo-topo { display: flex; align-items: center; gap: .7rem; margin-bottom: .85rem; }
         .status-dot {
-            width: 15px;
-            height: 15px;
-            flex: 0 0 15px;
-            border-radius: 50%;
-            box-shadow: 0 0 0 5px var(--halo);
-            background: var(--cor);
+            width: 15px; height: 15px; flex: 0 0 15px; border-radius: 50%;
+            box-shadow: 0 0 0 5px var(--halo); background: var(--cor);
         }
         .veiculo-nome { color: #172033; font-size: 1.12rem; font-weight: 750; }
-        .veiculo-id { margin-bottom: 0.8rem; color: #64748b; font-size: 0.82rem; }
+        .veiculo-id { margin-bottom: .8rem; color: #64748b; font-size: .82rem; }
         .responsavel-label {
-            color: #94a3b8;
-            font-size: 0.76rem;
-            font-weight: 700;
-            letter-spacing: 0.06em;
-            text-transform: uppercase;
+            color: #94a3b8; font-size: .76rem; font-weight: 700;
+            letter-spacing: .06em; text-transform: uppercase;
         }
-        .responsavel {
-            min-height: 2.5rem;
-            margin-top: 0.18rem;
-            color: #1e293b;
-            font-size: 1rem;
-            font-weight: 650;
-        }
+        .responsavel { min-height: 2.5rem; margin-top: .18rem; color: #1e293b; font-weight: 650; }
         .stButton > button { min-height: 42px; border-radius: 11px; font-weight: 700; }
+        .stButton > button[kind="secondary"] {
+            color: #263b61; border: 1px solid #cbd5e1; background: #fff; box-shadow: none;
+        }
+        .stButton > button[kind="secondary"]:hover {
+            color: #172033; border-color: #94a3b8; background: #f8fafc;
+        }
         @media (max-width: 640px) {
-            .block-container { padding: 1rem 0.8rem 2rem; }
+            .block-container { padding: 1rem .8rem 2rem; }
             .cabecalho { padding: 1.35rem; }
             .cabecalho h1 { font-size: 1.55rem; }
         }
@@ -204,28 +253,32 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-total = len(VEICULOS)
-emprestimos = consultar_emprestimos()
-disponiveis = sum(
-    emprestimos[v["id"]] == "Disponível" for v in VEICULOS
-)
-emprestados = total - disponiveis
+try:
+    dados = executar_com_lock()
+except Exception as erro:
+    st.error("Não foi possível acessar o arquivo veiculos.json. Tente atualizar a página.")
+    with st.expander("Detalhes técnicos"):
+        st.code(str(erro))
+    st.stop()
 
-m1, m2, m3 = st.columns(3)
-m1.metric("Total da frota", total)
-m2.metric("Disponíveis", disponiveis)
-m3.metric("Em uso", emprestados)
-
-if st.button("↻ Atualizar status", use_container_width=True):
-    st.rerun()
+acao_adicionar, acao_atualizar = st.columns(2)
+with acao_adicionar:
+    if st.button("＋ Adicionar veículo", type="primary", use_container_width=True):
+        abrir_adicao()
+with acao_atualizar:
+    if st.button("↻ Atualizar status", type="secondary", use_container_width=True):
+        st.rerun()
 
 st.write("")
 
-for inicio in range(0, len(VEICULOS), 2):
-    colunas = st.columns(2)
+veiculos = dados["veiculos"]
+if not veiculos:
+    st.info("Nenhum veículo cadastrado. Use “Adicionar veículo” para começar.")
 
-    for coluna, veiculo in zip(colunas, VEICULOS[inicio : inicio + 2]):
-        responsavel = emprestimos[veiculo["id"]]
+for inicio in range(0, len(veiculos), 2):
+    colunas = st.columns(2)
+    for coluna, veiculo in zip(colunas, veiculos[inicio : inicio + 2]):
+        responsavel = veiculo.get("responsavel") or "Disponível"
         disponivel = responsavel == "Disponível"
         cor = "#22c55e" if disponivel else "#ef4444"
         halo = "rgba(34,197,94,.16)" if disponivel else "rgba(239,68,68,.16)"
@@ -238,30 +291,49 @@ for inicio in range(0, len(VEICULOS), 2):
                         <span class="status-dot" style="--cor:{cor};--halo:{halo}"></span>
                         <span class="veiculo-nome">{html.escape(veiculo["nome"])}</span>
                     </div>
-                    <div class="veiculo-id">ID: {veiculo["id"]}</div>
+                    <div class="veiculo-id">ID: {html.escape(veiculo["id"])}</div>
                     <div class="responsavel-label">Responsável atual</div>
                     <div class="responsavel">{html.escape(responsavel)}</div>
                     """,
                     unsafe_allow_html=True,
                 )
-
-                botao_pegar, botao_devolver = st.columns(2)
-                with botao_pegar:
+                pegar, devolver, remover = st.columns(3)
+                with pegar:
                     if st.button(
-                        "Pegar",
-                        key=f'pegar_{veiculo["id"]}',
-                        type="primary",
-                        disabled=not disponivel,
-                        use_container_width=True,
+                        "Pegar", key=f'pegar_{veiculo["id"]}', type="primary",
+                        disabled=not disponivel, use_container_width=True,
                     ):
                         abrir_retirada(veiculo)
+                with devolver:
+                    if st.button(
+                        "Devolver", key=f'devolver_{veiculo["id"]}',
+                        disabled=disponivel, use_container_width=True,
+                    ):
+                        devolver_veiculo(veiculo["id"])
+                        st.rerun()
+                with remover:
+                    if st.button(
+                        "Remover", key=f'remover_{veiculo["id"]}',
+                        disabled=not disponivel, use_container_width=True,
+                    ):
+                        abrir_remocao(veiculo)
 
-                with botao_devolver:
-                    st.button(
-                        "Devolver",
-                        key=f'devolver_{veiculo["id"]}',
-                        on_click=devolver,
-                        args=(veiculo["id"],),
-                        disabled=disponivel,
-                        use_container_width=True,
-                    )
+st.write("")
+with st.expander(f'📋 Histórico de movimentações ({len(dados["historico"])})'):
+    historico = list(reversed(dados["historico"]))
+    if historico:
+        st.dataframe(
+            historico,
+            column_order=["data_hora", "movimento", "veiculo", "id", "responsavel"],
+            column_config={
+                "data_hora": "Data e hora",
+                "movimento": "Movimento",
+                "veiculo": "Veículo",
+                "id": "ID",
+                "responsavel": "Responsável",
+            },
+            hide_index=True,
+            use_container_width=True,
+        )
+    else:
+        st.caption("Nenhuma movimentação registrada.")
