@@ -344,19 +344,19 @@ st.markdown(
         .responsavel { min-height: 2.5rem; margin-top: .18rem; color: #f1f5f9; font-weight: 650; }
         .gestao-titulo {
             margin: 0 0 .35rem;
-            color: #172033 !important;
+            color: #f8fafc !important;
             font-size: 1.7rem;
             font-weight: 800;
         }
         .gestao-descricao, .gestao-label {
-            color: #475569 !important;
+            color: #cbd5e1 !important;
         }
         .gestao-descricao { margin: 0 0 1rem; }
         .gestao-label { margin: .9rem 0 .35rem; font-size: .9rem; font-weight: 650; }
         div[data-testid="stExpander"] summary p,
         div[data-testid="stExpander"] summary svg {
-            color: #172033 !important;
-            fill: #172033 !important;
+            color: #f8fafc !important;
+            fill: #f8fafc !important;
         }
         .stButton > button { min-height: 42px; border-radius: 11px; font-weight: 700; }
         .stButton > button[kind="secondary"] {
