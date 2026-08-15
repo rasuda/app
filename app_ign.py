@@ -284,6 +284,26 @@ st.markdown(
         .stButton > button[kind="secondary"]:hover {
             color: #172033; border-color: #94a3b8; background: #f8fafc;
         }
+        div[class*="st-key-pegar_"] button {
+            color: #ffffff !important;
+            border-color: #22c55e !important;
+            background: #22c55e !important;
+            box-shadow: 0 6px 16px rgba(34, 197, 94, .22) !important;
+        }
+        div[class*="st-key-pegar_"] button:hover {
+            border-color: #16a34a !important;
+            background: #16a34a !important;
+        }
+        div[class*="st-key-devolver_"] button {
+            color: #ffffff !important;
+            border-color: #ef4444 !important;
+            background: #ef4444 !important;
+            box-shadow: 0 6px 16px rgba(239, 68, 68, .22) !important;
+        }
+        div[class*="st-key-devolver_"] button:hover {
+            border-color: #dc2626 !important;
+            background: #dc2626 !important;
+        }
         @media (max-width: 640px) {
             .block-container { padding: 1rem .8rem 2rem; }
             .cabecalho { padding: 1.35rem; }
