@@ -117,6 +117,40 @@ def adicionar_veiculo(veiculo_id: str, nome: str) -> tuple[bool, str]:
     return executar_com_lock(operacao)
 
 
+def editar_veiculo(
+    veiculo_id_atual: str, novo_id: str, novo_nome: str
+) -> tuple[bool, str]:
+    novo_id = novo_id.strip().upper()
+    novo_nome = novo_nome.strip()
+
+    def operacao(dados):
+        veiculo = next(
+            v for v in dados["veiculos"] if v["id"] == veiculo_id_atual
+        )
+        if any(
+            v["id"].upper() == novo_id and v["id"] != veiculo_id_atual
+            for v in dados["veiculos"]
+        ):
+            return False, "Já existe outro veículo com esse ID."
+
+        nome_anterior = veiculo["nome"]
+        id_anterior = veiculo["id"]
+        if nome_anterior == novo_nome and id_anterior == novo_id:
+            return False, "Nenhuma alteração foi realizada."
+
+        veiculo["nome"] = novo_nome
+        veiculo["id"] = novo_id
+        registrar_historico(
+            dados,
+            "Veículo editado",
+            veiculo,
+            f"{nome_anterior} ({id_anterior}) → {novo_nome} ({novo_id})",
+        )
+        return True, "Veículo atualizado."
+
+    return executar_com_lock(operacao)
+
+
 def retirar_veiculo(veiculo_id: str, responsavel: str) -> tuple[bool, str]:
     def operacao(dados):
         veiculo = next(v for v in dados["veiculos"] if v["id"] == veiculo_id)
@@ -189,6 +223,36 @@ def abrir_adicao() -> None:
         st.error(mensagem)
 
 
+@st.dialog("Editar veículo", icon="✏️")
+def abrir_edicao(veiculos: list[dict]) -> None:
+    veiculo = st.selectbox(
+        "Veículo para editar",
+        options=veiculos,
+        format_func=lambda v: f'{v["nome"]} — {v["id"]}',
+        key="editar_selecao",
+    )
+    novo_id = st.text_input(
+        "Número ID",
+        value=veiculo["id"],
+        key=f'editar_id_{veiculo["id"]}',
+    )
+    novo_nome = st.text_input(
+        "Nome do veículo",
+        value=veiculo["nome"],
+        key=f'editar_nome_{veiculo["id"]}',
+    )
+    if st.button("Salvar alterações", type="primary", use_container_width=True):
+        if not novo_id.strip() or not novo_nome.strip():
+            st.error("Preencha o ID e o nome do veículo.")
+            return
+        sucesso, mensagem = editar_veiculo(
+            veiculo["id"], novo_id, novo_nome
+        )
+        if sucesso:
+            st.rerun()
+        st.error(mensagem)
+
+
 @st.dialog("Retirar veículo", icon="🚗")
 def abrir_retirada(veiculo: dict) -> None:
     st.write(f'Você está retirando **{veiculo["nome"]}** — `{veiculo["id"]}`')
@@ -251,38 +315,55 @@ def abrir_reordenacao(veiculos: list[dict]) -> None:
 st.markdown(
     """
     <style>
-        .stApp { background: #f4f7fb; }
+        .stApp { background: #070b14; color: #f8fafc; }
         #MainMenu, header, footer { visibility: hidden; }
         .block-container { max-width: 1180px; padding-top: 2.5rem; padding-bottom: 3rem; }
         .cabecalho {
             padding: 1.8rem 2rem; margin-bottom: 1.2rem; color: white;
-            border-radius: 22px; background: linear-gradient(135deg, #172033, #263b61);
-            box-shadow: 0 14px 34px rgba(23, 32, 51, 0.18);
+            border: 1px solid #263244; border-radius: 22px;
+            background: linear-gradient(135deg, #111827, #1e293b);
+            box-shadow: 0 14px 34px rgba(0, 0, 0, .35);
         }
         .cabecalho h1 { margin: 0; color: white; font-size: 2rem; }
-        .cabecalho p { margin: 0.45rem 0 0; color: #cbd5e1; }
+        .cabecalho p { margin: 0.45rem 0 0; color: #94a3b8; }
         div[data-testid="stVerticalBlockBorderWrapper"] {
-            border-color: #e2e8f0; border-radius: 18px; background: white;
-            box-shadow: 0 8px 24px rgba(15, 23, 42, 0.06);
+            border-color: #263244; border-radius: 18px; background: #111827;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, .24);
         }
         .veiculo-topo { display: flex; align-items: center; gap: .7rem; margin-bottom: .85rem; }
         .status-dot {
             width: 15px; height: 15px; flex: 0 0 15px; border-radius: 50%;
             box-shadow: 0 0 0 5px var(--halo); background: var(--cor);
         }
-        .veiculo-nome { color: #172033; font-size: 1.12rem; font-weight: 750; }
-        .veiculo-id { margin-bottom: .8rem; color: #64748b; font-size: .82rem; }
+        .veiculo-nome { color: #f8fafc; font-size: 1.12rem; font-weight: 750; }
+        .veiculo-id { margin-bottom: .8rem; color: #94a3b8; font-size: .82rem; }
         .responsavel-label {
-            color: #94a3b8; font-size: .76rem; font-weight: 700;
+            color: #64748b; font-size: .76rem; font-weight: 700;
             letter-spacing: .06em; text-transform: uppercase;
         }
-        .responsavel { min-height: 2.5rem; margin-top: .18rem; color: #1e293b; font-weight: 650; }
+        .responsavel { min-height: 2.5rem; margin-top: .18rem; color: #f1f5f9; font-weight: 650; }
+        .gestao-titulo {
+            margin: 0 0 .35rem;
+            color: #172033 !important;
+            font-size: 1.7rem;
+            font-weight: 800;
+        }
+        .gestao-descricao, .gestao-label {
+            color: #475569 !important;
+        }
+        .gestao-descricao { margin: 0 0 1rem; }
+        .gestao-label { margin: .9rem 0 .35rem; font-size: .9rem; font-weight: 650; }
+        div[data-testid="stExpander"] summary p,
+        div[data-testid="stExpander"] summary svg {
+            color: #172033 !important;
+            fill: #172033 !important;
+        }
         .stButton > button { min-height: 42px; border-radius: 11px; font-weight: 700; }
         .stButton > button[kind="secondary"] {
-            color: #263b61; border: 1px solid #cbd5e1; background: #fff; box-shadow: none;
+            color: #e2e8f0; border: 1px solid #334155; background: #182235; box-shadow: none;
         }
         .stButton > button[kind="secondary"]:hover {
-            color: #172033; border-color: #94a3b8; background: #f8fafc;
+            color: #ffffff; border-color: #475569; background: #243146;
         }
         div[class*="st-key-pegar_"] button {
             color: #ffffff !important;
@@ -419,8 +500,13 @@ with st.expander(f'📋 Histórico de movimentações ({len(dados["historico"])}
 
 st.write("")
 with st.container(border=True):
-    st.subheader("⚙️ Gestão da frota")
-    st.caption("Adicione, remova ou altere a ordem dos veículos.")
+    st.markdown(
+        """
+        <h3 class="gestao-titulo">⚙️ Gestão da frota</h3>
+        <p class="gestao-descricao">Adicione, remova, edite ou altere a ordem dos veículos.</p>
+        """,
+        unsafe_allow_html=True,
+    )
 
     if st.button(
         "＋ Adicionar veículo",
@@ -434,11 +520,16 @@ with st.container(border=True):
         veiculo for veiculo in veiculos if not veiculo.get("responsavel")
     ]
     if disponiveis_para_remocao:
+        st.markdown(
+            '<p class="gestao-label">Veículo disponível para remoção</p>',
+            unsafe_allow_html=True,
+        )
         veiculo_selecionado = st.selectbox(
             "Veículo disponível para remoção",
             options=disponiveis_para_remocao,
             format_func=lambda v: f'{v["nome"]} — {v["id"]}',
             key="veiculo_para_remover",
+            label_visibility="collapsed",
         )
         if st.button(
             "Remover veículo",
@@ -457,3 +548,11 @@ with st.container(border=True):
         use_container_width=True,
     ):
         abrir_reordenacao(veiculos)
+
+    if veiculos and st.button(
+        "✏️ Editar veículo",
+        key="gestao_editar",
+        type="secondary",
+        use_container_width=True,
+    ):
+        abrir_edicao(veiculos)
