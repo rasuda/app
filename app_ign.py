@@ -24,6 +24,19 @@ FUSO_HORARIO = ZoneInfo("America/Sao_Paulo")
 ARMAZENAMENTO_NAVEGADOR = LocalStorage()
 CHAVE_ULTIMO_RESPONSAVEL = "controle_veiculos_ultimo_responsavel"
 
+# A leitura acontece na página principal para dar tempo ao componente do
+# navegador de devolver o valor antes de o usuário abrir o popup.
+ultimo_responsavel_armazenado = ARMAZENAMENTO_NAVEGADOR.getItem(
+    CHAVE_ULTIMO_RESPONSAVEL
+)
+if (
+    isinstance(ultimo_responsavel_armazenado, str)
+    and ultimo_responsavel_armazenado.strip()
+):
+    st.session_state["ultimo_responsavel_navegador"] = (
+        ultimo_responsavel_armazenado.strip()
+    )
+
 # Usado somente na primeira execução, quando veiculos.json ainda não existe.
 FROTA_INICIAL = [
     {"id": f"VEI-{numero:03d}", "nome": f"Veículo {numero:02d}"}
@@ -258,12 +271,12 @@ def abrir_edicao(veiculos: list[dict]) -> None:
 
 @st.dialog("Retirar veículo", icon="🚗")
 def abrir_retirada(veiculo: dict) -> None:
+    chave_conclusao = f'retirada_concluida_{veiculo["id"]}'
+    if st.session_state.pop(chave_conclusao, False):
+        st.rerun()
+
     st.write(f'Você está retirando **{veiculo["nome"]}** — `{veiculo["id"]}`')
-    nome_salvo = ARMAZENAMENTO_NAVEGADOR.getItem(
-        CHAVE_ULTIMO_RESPONSAVEL
-    )
-    if not isinstance(nome_salvo, str):
-        nome_salvo = ""
+    nome_salvo = st.session_state.get("ultimo_responsavel_navegador", "")
     nome = st.text_input(
         "Nome de quem vai pegar o veículo",
         value=nome_salvo,
@@ -277,11 +290,14 @@ def abrir_retirada(veiculo: dict) -> None:
             return
         sucesso, mensagem = retirar_veiculo(veiculo["id"], nome)
         if sucesso:
+            st.session_state["ultimo_responsavel_navegador"] = nome
+            st.session_state[chave_conclusao] = True
             ARMAZENAMENTO_NAVEGADOR.setItem(
                 CHAVE_ULTIMO_RESPONSAVEL,
                 nome,
             )
-            st.rerun()
+            st.success("Retirada registrada. Atualizando...")
+            return
         st.error(mensagem)
 
 
