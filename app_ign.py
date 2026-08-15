@@ -261,13 +261,8 @@ except Exception as erro:
         st.code(str(erro))
     st.stop()
 
-acao_adicionar, acao_atualizar = st.columns(2)
-with acao_adicionar:
-    if st.button("＋ Adicionar veículo", type="primary", use_container_width=True):
-        abrir_adicao()
-with acao_atualizar:
-    if st.button("↻ Atualizar status", type="secondary", use_container_width=True):
-        st.rerun()
+if st.button("↻ Atualizar status", type="secondary", use_container_width=True):
+    st.rerun()
 
 st.write("")
 
@@ -297,26 +292,19 @@ for inicio in range(0, len(veiculos), 2):
                     """,
                     unsafe_allow_html=True,
                 )
-                pegar, devolver, remover = st.columns(3)
-                with pegar:
+                if disponivel:
                     if st.button(
                         "Pegar", key=f'pegar_{veiculo["id"]}', type="primary",
-                        disabled=not disponivel, use_container_width=True,
+                        use_container_width=True,
                     ):
                         abrir_retirada(veiculo)
-                with devolver:
+                else:
                     if st.button(
                         "Devolver", key=f'devolver_{veiculo["id"]}',
-                        disabled=disponivel, use_container_width=True,
+                        type="secondary", use_container_width=True,
                     ):
                         devolver_veiculo(veiculo["id"])
                         st.rerun()
-                with remover:
-                    if st.button(
-                        "Remover", key=f'remover_{veiculo["id"]}',
-                        disabled=not disponivel, use_container_width=True,
-                    ):
-                        abrir_remocao(veiculo)
 
 st.write("")
 with st.expander(f'📋 Histórico de movimentações ({len(dados["historico"])})'):
@@ -337,3 +325,42 @@ with st.expander(f'📋 Histórico de movimentações ({len(dados["historico"])}
         )
     else:
         st.caption("Nenhuma movimentação registrada.")
+
+st.write("")
+with st.container(border=True):
+    st.subheader("⚙️ Gestão da frota")
+    st.caption("Adicione novos veículos ou remova veículos disponíveis.")
+
+    adicionar, remover = st.columns(2)
+    with adicionar:
+        st.markdown("**Adicionar veículo**")
+        st.caption("Cadastre um novo nome e número ID.")
+        if st.button(
+            "＋ Adicionar veículo",
+            key="gestao_adicionar",
+            type="primary",
+            use_container_width=True,
+        ):
+            abrir_adicao()
+
+    with remover:
+        st.markdown("**Remover veículo**")
+        disponiveis_para_remocao = [
+            veiculo for veiculo in veiculos if not veiculo.get("responsavel")
+        ]
+        if disponiveis_para_remocao:
+            veiculo_selecionado = st.selectbox(
+                "Selecione um veículo disponível",
+                options=disponiveis_para_remocao,
+                format_func=lambda v: f'{v["nome"]} — {v["id"]}',
+                key="veiculo_para_remover",
+            )
+            if st.button(
+                "Remover veículo",
+                key="gestao_remover",
+                type="secondary",
+                use_container_width=True,
+            ):
+                abrir_remocao(veiculo_selecionado)
+        else:
+            st.info("Não há veículos disponíveis para remoção.")
