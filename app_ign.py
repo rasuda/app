@@ -260,8 +260,7 @@ def abrir_edicao(veiculos: list[dict]) -> None:
 def abrir_retirada(veiculo: dict) -> None:
     st.write(f'Você está retirando **{veiculo["nome"]}** — `{veiculo["id"]}`')
     nome_salvo = ARMAZENAMENTO_NAVEGADOR.getItem(
-        CHAVE_ULTIMO_RESPONSAVEL,
-        key=f'ler_ultimo_responsavel_{veiculo["id"]}',
+        CHAVE_ULTIMO_RESPONSAVEL
     )
     if not isinstance(nome_salvo, str):
         nome_salvo = ""
@@ -281,7 +280,6 @@ def abrir_retirada(veiculo: dict) -> None:
             ARMAZENAMENTO_NAVEGADOR.setItem(
                 CHAVE_ULTIMO_RESPONSAVEL,
                 nome,
-                key=f'salvar_ultimo_responsavel_{veiculo["id"]}',
             )
             st.rerun()
         st.error(mensagem)
