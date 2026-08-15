@@ -377,13 +377,21 @@ st.markdown(
             width: 15px; height: 15px; flex: 0 0 15px; border-radius: 50%;
             box-shadow: 0 0 0 5px var(--halo); background: var(--cor);
         }
-        .veiculo-nome { color: #f8fafc; font-size: 1.12rem; font-weight: 750; }
+        .veiculo-nome {
+            min-width: 0; flex: 1; overflow: hidden; white-space: nowrap;
+            text-overflow: ellipsis;
+            color: #f8fafc; font-size: 1.12rem; font-weight: 750;
+        }
         .veiculo-id { margin-bottom: .8rem; color: #94a3b8; font-size: .82rem; }
         .responsavel-label {
             color: #64748b; font-size: .76rem; font-weight: 700;
             letter-spacing: .06em; text-transform: uppercase;
         }
-        .responsavel { min-height: 2.5rem; margin-top: .18rem; color: #f1f5f9; font-weight: 650; }
+        .responsavel {
+            min-width: 0; min-height: 2.5rem; margin-top: .18rem;
+            overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+            color: #f1f5f9; font-weight: 650;
+        }
         .gestao-titulo {
             margin: 0 0 .35rem;
             color: #f8fafc !important;
