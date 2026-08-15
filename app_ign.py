@@ -273,7 +273,20 @@ def abrir_retirada(veiculo: dict) -> None:
 
 
 @st.dialog("Remover veículo", icon="🗑️")
-def abrir_remocao(veiculo: dict) -> None:
+def abrir_remocao(veiculos: list[dict]) -> None:
+    disponiveis = [
+        veiculo for veiculo in veiculos if not veiculo.get("responsavel")
+    ]
+    if not disponiveis:
+        st.info("Não há veículos disponíveis para remoção.")
+        return
+
+    veiculo = st.selectbox(
+        "Veículo para remover",
+        options=disponiveis,
+        format_func=lambda v: f'{v["nome"]} — {v["id"]}',
+        key="remover_selecao",
+    )
     st.warning(
         f'Deseja remover **{veiculo["nome"]}** — `{veiculo["id"]}` da frota?'
     )
@@ -515,30 +528,13 @@ with st.container(border=True):
     ):
         abrir_adicao()
 
-    disponiveis_para_remocao = [
-        veiculo for veiculo in veiculos if not veiculo.get("responsavel")
-    ]
-    if disponiveis_para_remocao:
-        st.markdown(
-            '<p class="gestao-label">Veículo disponível para remoção</p>',
-            unsafe_allow_html=True,
-        )
-        veiculo_selecionado = st.selectbox(
-            "Veículo disponível para remoção",
-            options=disponiveis_para_remocao,
-            format_func=lambda v: f'{v["nome"]} — {v["id"]}',
-            key="veiculo_para_remover",
-            label_visibility="collapsed",
-        )
-        if st.button(
-            "Remover veículo",
-            key="gestao_remover",
-            type="secondary",
-            use_container_width=True,
-        ):
-            abrir_remocao(veiculo_selecionado)
-    else:
-        st.info("Não há veículos disponíveis para remoção.")
+    if veiculos and st.button(
+        "🗑️ Remover veículo",
+        key="gestao_remover",
+        type="secondary",
+        use_container_width=True,
+    ):
+        abrir_remocao(veiculos)
 
     if veiculos and st.button(
         "↕ Reordenar veículos",
