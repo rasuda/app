@@ -419,7 +419,6 @@ st.markdown(
     """
     <section class="cabecalho">
         <h1>🚗 Controle de Veículos</h1>
-        <p>Gerencie a retirada e a devolução dos veículos da frota.</p>
     </section>
     """,
     unsafe_allow_html=True,
