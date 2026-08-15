@@ -151,6 +151,30 @@ def remover_veiculo(veiculo_id: str) -> tuple[bool, str]:
     return executar_com_lock(operacao)
 
 
+def reordenar_veiculo(veiculo_id: str, nova_posicao: int) -> tuple[bool, str]:
+    def operacao(dados):
+        veiculos = dados["veiculos"]
+        indice_atual = next(
+            indice for indice, veiculo in enumerate(veiculos)
+            if veiculo["id"] == veiculo_id
+        )
+        novo_indice = max(0, min(nova_posicao - 1, len(veiculos) - 1))
+        if indice_atual == novo_indice:
+            return False, "O veículo já está nessa posição."
+
+        veiculo = veiculos.pop(indice_atual)
+        veiculos.insert(novo_indice, veiculo)
+        registrar_historico(
+            dados,
+            "Veículo reordenado",
+            veiculo,
+            f"Posição {indice_atual + 1} → {novo_indice + 1}",
+        )
+        return True, "Ordem atualizada."
+
+    return executar_com_lock(operacao)
+
+
 @st.dialog("Adicionar veículo", icon="➕")
 def abrir_adicao() -> None:
     veiculo_id = st.text_input("Número ID", placeholder="Ex.: VEI-011")
@@ -197,6 +221,33 @@ def abrir_remocao(veiculo: dict) -> None:
         st.error(mensagem)
 
 
+@st.dialog("Reordenar veículos", icon="↕️")
+def abrir_reordenacao(veiculos: list[dict]) -> None:
+    veiculo = st.selectbox(
+        "Veículo",
+        options=veiculos,
+        format_func=lambda v: f'{v["nome"]} — {v["id"]}',
+        key="reordenar_veiculo",
+    )
+    posicao_atual = next(
+        indice for indice, item in enumerate(veiculos, start=1)
+        if item["id"] == veiculo["id"]
+    )
+    nova_posicao = st.number_input(
+        "Nova posição",
+        min_value=1,
+        max_value=len(veiculos),
+        value=posicao_atual,
+        step=1,
+    )
+    st.caption(f"Posição atual: {posicao_atual} de {len(veiculos)}")
+    if st.button("Salvar nova ordem", type="primary", use_container_width=True):
+        sucesso, mensagem = reordenar_veiculo(veiculo["id"], int(nova_posicao))
+        if sucesso:
+            st.rerun()
+        st.error(mensagem)
+
+
 st.markdown(
     """
     <style>
@@ -237,6 +288,26 @@ st.markdown(
             .block-container { padding: 1rem .8rem 2rem; }
             .cabecalho { padding: 1.35rem; }
             .cabecalho h1 { font-size: 1.55rem; }
+            div[data-testid="stHorizontalBlock"] {
+                display: flex;
+                flex-wrap: nowrap;
+                gap: .55rem;
+            }
+            div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {
+                min-width: 0;
+                flex: 1 1 0;
+                width: 50%;
+            }
+            div[data-testid="stVerticalBlockBorderWrapper"] {
+                border-radius: 14px;
+            }
+            .veiculo-topo { gap: .45rem; margin-bottom: .5rem; }
+            .status-dot { width: 11px; height: 11px; flex-basis: 11px; }
+            .veiculo-nome { font-size: .93rem; }
+            .veiculo-id { margin-bottom: .55rem; font-size: .7rem; }
+            .responsavel-label { font-size: .62rem; letter-spacing: .03em; }
+            .responsavel { min-height: 2rem; font-size: .82rem; }
+            .stButton > button { min-height: 38px; padding: .35rem; font-size: .82rem; }
         }
     </style>
     """,
@@ -329,38 +400,40 @@ with st.expander(f'📋 Histórico de movimentações ({len(dados["historico"])}
 st.write("")
 with st.container(border=True):
     st.subheader("⚙️ Gestão da frota")
-    st.caption("Adicione novos veículos ou remova veículos disponíveis.")
+    st.caption("Adicione, remova ou altere a ordem dos veículos.")
 
-    adicionar, remover = st.columns(2)
-    with adicionar:
-        st.markdown("**Adicionar veículo**")
-        st.caption("Cadastre um novo nome e número ID.")
+    if st.button(
+        "＋ Adicionar veículo",
+        key="gestao_adicionar",
+        type="primary",
+        use_container_width=True,
+    ):
+        abrir_adicao()
+
+    disponiveis_para_remocao = [
+        veiculo for veiculo in veiculos if not veiculo.get("responsavel")
+    ]
+    if disponiveis_para_remocao:
+        veiculo_selecionado = st.selectbox(
+            "Veículo disponível para remoção",
+            options=disponiveis_para_remocao,
+            format_func=lambda v: f'{v["nome"]} — {v["id"]}',
+            key="veiculo_para_remover",
+        )
         if st.button(
-            "＋ Adicionar veículo",
-            key="gestao_adicionar",
-            type="primary",
+            "Remover veículo",
+            key="gestao_remover",
+            type="secondary",
             use_container_width=True,
         ):
-            abrir_adicao()
+            abrir_remocao(veiculo_selecionado)
+    else:
+        st.info("Não há veículos disponíveis para remoção.")
 
-    with remover:
-        st.markdown("**Remover veículo**")
-        disponiveis_para_remocao = [
-            veiculo for veiculo in veiculos if not veiculo.get("responsavel")
-        ]
-        if disponiveis_para_remocao:
-            veiculo_selecionado = st.selectbox(
-                "Selecione um veículo disponível",
-                options=disponiveis_para_remocao,
-                format_func=lambda v: f'{v["nome"]} — {v["id"]}',
-                key="veiculo_para_remover",
-            )
-            if st.button(
-                "Remover veículo",
-                key="gestao_remover",
-                type="secondary",
-                use_container_width=True,
-            ):
-                abrir_remocao(veiculo_selecionado)
-        else:
-            st.info("Não há veículos disponíveis para remoção.")
+    if veiculos and st.button(
+        "↕ Reordenar veículos",
+        key="gestao_reordenar",
+        type="secondary",
+        use_container_width=True,
+    ):
+        abrir_reordenacao(veiculos)
