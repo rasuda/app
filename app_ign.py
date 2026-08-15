@@ -8,6 +8,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import streamlit as st
+from streamlit_local_storage import LocalStorage
 
 
 st.set_page_config(
@@ -20,6 +21,8 @@ st.set_page_config(
 ARQUIVO_JSON = Path(__file__).with_name("veiculos.json")
 ARQUIVO_LOCK = Path(__file__).with_name("veiculos.lock")
 FUSO_HORARIO = ZoneInfo("America/Sao_Paulo")
+ARMAZENAMENTO_NAVEGADOR = LocalStorage()
+CHAVE_ULTIMO_RESPONSAVEL = "controle_veiculos_ultimo_responsavel"
 
 # Usado somente na primeira execução, quando veiculos.json ainda não existe.
 FROTA_INICIAL = [
@@ -256,8 +259,15 @@ def abrir_edicao(veiculos: list[dict]) -> None:
 @st.dialog("Retirar veículo", icon="🚗")
 def abrir_retirada(veiculo: dict) -> None:
     st.write(f'Você está retirando **{veiculo["nome"]}** — `{veiculo["id"]}`')
+    nome_salvo = ARMAZENAMENTO_NAVEGADOR.getItem(
+        CHAVE_ULTIMO_RESPONSAVEL,
+        key=f'ler_ultimo_responsavel_{veiculo["id"]}',
+    )
+    if not isinstance(nome_salvo, str):
+        nome_salvo = ""
     nome = st.text_input(
         "Nome de quem vai pegar o veículo",
+        value=nome_salvo,
         placeholder="Digite o nome completo",
         key=f'nome_retirada_{veiculo["id"]}',
     )
@@ -268,6 +278,11 @@ def abrir_retirada(veiculo: dict) -> None:
             return
         sucesso, mensagem = retirar_veiculo(veiculo["id"], nome)
         if sucesso:
+            ARMAZENAMENTO_NAVEGADOR.setItem(
+                CHAVE_ULTIMO_RESPONSAVEL,
+                nome,
+                key=f'salvar_ultimo_responsavel_{veiculo["id"]}',
+            )
             st.rerun()
         st.error(mensagem)
 
